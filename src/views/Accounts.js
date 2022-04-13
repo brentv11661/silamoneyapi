@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Container, Table, Button, Row, Col, Form } from 'react-bootstrap';
-import { usePlaidLink } from 'react-plaid-link';
+import { Container, Table, Button, Row, Col, Form, OverlayTrigger, Tooltip } from 'react-bootstrap';
 
 import { useAppContext } from '../components/context/AppDataProvider';
 
@@ -10,40 +9,8 @@ import Pagination from '../components/common/Pagination';
 import LinkAccountModal from '../components/accounts/LinkAccountModal';
 import ProcessorTokenModal from '../components/accounts/ProcessorTokenModal';
 import InstitutionsModal from '../components/accounts/InstitutionsModal';
+import ProcessorTokenFlowModal from '../components/accounts/ProcessorTokenFlowModal';
 import ConfirmModal from '../components/common/ConfirmModal';
-
-const PlaidButton = ({ plaidToken, onSuccess }) => {
-  const { app, updateApp } = useAppContext();
-  const activeUser = app.settings.flow === 'kyb' ? app.users.find(user => app.settings.kybHandle === user.handle) : app.activeUser;
-  const { open, ready, error } = usePlaidLink({
-    clientName: 'Plaid Walkthrough Demo',
-    env: 'sandbox',
-    product: ['auth'],
-    language: 'en',
-    userLegalName: app.settings.kybHandle ? app.settings.kybHandle : `${activeUser.firstName} ${activeUser.lastName}`,
-    userEmailAddress: activeUser.email,
-    token: plaidToken.token,
-    onSuccess: (token, metadata) => onSuccess(token, metadata)
-  });
-
-  const onOpen = () => {
-    if (activeUser && !activeUser.email) {
-      updateApp({ alert: { message: 'Email address is required to Connect via Plaid Link. please add your email from the Registered User page.', type: 'warning' } });
-      return;
-    }
-    open();
-  }
-
-  useEffect(() => {
-    if (plaidToken.token && plaidToken.auto && ready && open) open();
-  }, [plaidToken]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (error) updateApp({ alert: { message: error, type: 'danger' } });
-  }, [error]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return <Button block className="mb-4 text-nowrap" onClick={onOpen} disabled={!ready}>{plaidToken && plaidToken.account_name ? 'Launch microdeposit verification in Plaid' : 'Connect via Plaid Link'}</Button>;
-};
 
 const Accounts = ({ page, previous, next, isActive }) => {
   const { app, api, setAppData, updateApp, handleError } = useAppContext();
@@ -59,6 +26,7 @@ const Accounts = ({ page, previous, next, isActive }) => {
   const [institutions, setInstitutions] = useState({data: [], total_count:0, total_pages: 0, perPage: 100} );
   const [isFetching, setIsFetching] = useState(false);
   const [errors, setErrors] = useState(false);
+  const [processorTokenFlowModal, setProcessorTokenFlowModal] = useState(false);
   const tbodyRef = useRef()
   let result = {};
   let appData = {};
@@ -120,34 +88,6 @@ const Accounts = ({ page, previous, next, isActive }) => {
       const res = await api.plaidLinkToken(activeUser.handle, activeUser.private_key);
       console.log('  ... completed!');
       setPlaidToken({ token: res.data.link_token });
-    } catch (err) {
-      console.log('  ... looks like we ran into an issue!');
-      handleError(err);
-    }
-  };
-
-  const linkAccount = async (token, metadata) => {
-    console.log('Linking account ...');
-    updateApp({ alert: { message: 'Linking account ...', type: 'info', noIcon: true, loading: true } });
-    try {
-      const res = await api.linkAccount(activeUser.handle, activeUser.private_key, token, metadata.account.name, metadata.account_id, 'link');
-      const responseObj = { endpoint: '/link_account', result: JSON.stringify(res, null, '\t') };
-      let result = {};
-      console.log('  ... completed!');
-      if (res.statusCode === 200) {
-        result.alert = { message: 'Bank account successfully linked!', type: 'success' };
-        getAccounts(responseObj);
-      } else if (metadata.account.verification_status === 'pending_automatic_verification') {
-        setPlaidToken({ token, auto: true });
-        onResponse(responseObj);
-      } else if (metadata.account.verification_status === 'pending_manual_verification') {
-        result.alert = { message: 'Bank account requires manual verification!', type: 'danger' };
-        getAccounts(responseObj);
-      } else {
-        result.alert = { message: res.data.message, type: 'danger' };
-        onResponse(responseObj);
-      }
-      updateApp({ ...result });
     } catch (err) {
       console.log('  ... looks like we ran into an issue!');
       handleError(err);
@@ -340,6 +280,11 @@ const Accounts = ({ page, previous, next, isActive }) => {
     }
   }
 
+  const onShowProcessorTokenModal = () => {
+    setProcessorTokenFlowModal(false);
+    updateApp({ manageProcessorToken: true });
+  }
+
   useEffect(() => {
     getAccounts();
   }, [app.activeUser]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -373,28 +318,28 @@ const Accounts = ({ page, previous, next, isActive }) => {
   return (
     <Container fluid className={`main-content-container d-flex flex-column flex-grow-1 loaded ${page.replace('/', '')}`}>
 
-      <h1 className="mb-4">Link a Bank Account</h1>
+      <h1 className="mb-1">Link a Bank Account</h1>
 
-      <p className="text-muted text-lg">We've partnered with Plaid to connect bank accounts to the Sila platform. This helps us ensure account ownership.</p>
+      <p className="text-muted text-lg mb-1">We've partnered with Plaid to connect bank accounts to the Sila platform. This helps us ensure account ownership.</p>
      
-      <p className="text-muted text-lg">Connect via Account Routing: We also have the ability to connect bank accounts with just an account and routing number "This feature required Compliance Approval for processing"</p>
+      <p className="text-muted text-lg mb-1">Connect via Account Routing: We also have the ability to connect bank accounts with just an account and routing number "This feature required Compliance Approval for processing"</p>
 
-      <p className="text-muted text-lg">Connect Via Plaid Link" The Sila will support Legacy public token and Link integration for the near term, however, this functionality is marked for deprecation.</p>
+      <p className="text-muted text-lg mb-1">Connect Via Plaid Link" The Sila will support Legacy public token and Link integration for the near term, however, this functionality is marked for deprecation.</p>
 
-      <p className="text-muted text-lg">Connect via Processor Token: Please seek a direct relationship with Plaid to use our Processor Token functionality</p>
+      <p className="text-muted text-lg mb-1">Connect via Processor Token: Please seek a direct relationship with Plaid to use our Processor Token functionality</p>
 
-      <p className="text-muted mb-0 mb-5">This page represents <a href="https://docs.silamoney.com/docs/get_accounts" target="_blank" rel="noopener noreferrer">/get_accounts</a>, <a href="https://docs.silamoney.com/docs/get_institutions" target="_blank" rel="noopener noreferrer">/get_institutions</a>, <a href="https://docs.silamoney.com/docs/plaid_link_token" target="_blank" rel="noopener noreferrer">/plaid_link_token</a>, <a href="https://docs.silamoney.com/docs/link_account" target="_blank" rel="noopener noreferrer">/link_account</a>, <a href="https://docs.silamoney.com/docs/delete_account-1" target="_blank" rel="noopener noreferrer">/delete_account</a>, and <a href="https://docs.silamoney.com/docs/plaid_sameday_auth" target="_blank" rel="noopener noreferrer">/plaid_sameday_auth</a> functionality.</p>
+      <p className="text-muted mb-3">This page represents <a href="https://docs.silamoney.com/docs/get_accounts" target="_blank" rel="noopener noreferrer">/get_accounts</a>, <a href="https://docs.silamoney.com/docs/get_institutions" target="_blank" rel="noopener noreferrer">/get_institutions</a>, <a href="https://docs.silamoney.com/docs/plaid_link_token" target="_blank" rel="noopener noreferrer">/plaid_link_token</a>, <a href="https://docs.silamoney.com/docs/link_account" target="_blank" rel="noopener noreferrer">/link_account</a>, <a href="https://docs.silamoney.com/docs/delete_account-1" target="_blank" rel="noopener noreferrer">/delete_account</a>, and <a href="https://docs.silamoney.com/docs/plaid_sameday_auth" target="_blank" rel="noopener noreferrer">/plaid_sameday_auth</a> functionality.</p>
 
-      <div className="d-flex mb-3">
+      <div className="d-flex mb-2">
         <Button variant="link" className="p-0 ml-auto text-reset text-decoration-none loaded" onClick={() => getAccounts(undefined)}><i className="sila-icon sila-icon-refresh text-primary mr-2"></i><span className="lnk text-lg">Refresh</span></Button>
       </div>
 
-      <div className="accounts position-relative mb-5">
+      <div className="accounts position-relative mb-3">
         {(!loaded || !plaidToken) && <Loader overlay />}
         <Table bordered responsive>
           <thead>
             <tr>
-              <th className="text-lg bg-secondary text-dark font-weight-bold text-nowrap">Account  #</th>
+              <th className="text-lg bg-secondary text-dark font-weight-bold text-nowrap">Account #</th>
               <th className="text-lg bg-secondary text-dark font-weight-bold">Name</th>
               <th className="text-lg bg-secondary text-dark font-weight-bold">Type</th>
               <th className="text-lg bg-secondary text-dark font-weight-bold">Balance</th>
@@ -406,7 +351,17 @@ const Accounts = ({ page, previous, next, isActive }) => {
             {loaded && plaidToken && accounts.length > 0 ?
               accounts.map((acc, index) =>
                 <tr className="loaded" key={index}>
-                  <td>{acc.account_number}</td>
+                  <td>
+                    <div className="d-flex justify-content-between">
+                      {acc.account_number}
+                      <OverlayTrigger placement="top" delay={{ show: 250, hide: 400 }}
+                        overlay={(props) => <Tooltip id={`account-number-tooltip-${index}`} {...props}>Linked via {acc.account_link_status === 'processor_token' ? 'Processor Token' : 'Account/Routing'}</Tooltip>}>
+                        <Button variant="link" className="text-reset font-italic p-0 m-0 text-decoration-none shadow-none">
+                          <i className="sila-icon sila-icon-info text-primary ml-2"></i>
+                        </Button>
+                      </OverlayTrigger>
+                    </div>
+                  </td>
                   <td className="text-break">{activeRow.isEditing && activeRow.rowNumber === index ? <Form.Group controlId="accountNumber" className="required mb-0">
                     <Form.Control required placeholder="Account Name" name="account_number" className="p-2" autoFocus onChange={onEditing} onKeyDown={handleKeypress} defaultValue={acc.account_name ? acc.account_name : undefined} isInvalid={Boolean(error)} />
                     {error && <Form.Control.Feedback type="invalid">{error}</Form.Control.Feedback>}
@@ -420,7 +375,6 @@ const Accounts = ({ page, previous, next, isActive }) => {
                       </span> : <>
                         {(acc.account_link_status === 'instantly_verified' || acc.account_link_status === 'microdeposit_manually_verified' || acc.account_link_status === 'unverified_manual_input' || acc.account_link_status === 'processor_token') && <span className={acc.active ? 'text-success' : 'text-danger'}>{acc.active ? 'Active' : 'Inactive'}</span>}
                         {acc.account_link_status === 'microdeposit_pending_automatic_verification' && <span className="text-warning">Pending...</span>}
-                        {plaidToken && acc.account_link_status === 'microdeposit_pending_manual_verification' && plaidToken.account_name === acc.account_name && <PlaidButton plaidToken={plaidToken} onSuccess={linkAccount} />}
                         {acc.account_link_status === 'microdeposit_pending_manual_verification' && (!plaidToken || plaidToken.account_name !== acc.account_name) && <Button size="sm" variant="secondary" disabled={plaidToken} onClick={() => plaidSamedayAuth(acc.account_name)}>Manually Approve</Button>}
                     </>}
                   </td>
@@ -448,12 +402,11 @@ const Accounts = ({ page, previous, next, isActive }) => {
         {accounts.find(acc => acc.account_link_status === 'microdeposit_pending_manual_verification') && <p className="text-muted mt-4">With Same Day Micro-deposits, Plaid verfies the deposit within 1 business days Within the Sandbox timeframe, it’s only takes a few minutes. To jump back into your session, we’ll need you to retrieve a public token from Plaid. From there, two microdeposits should appear in your account within minutes. We will need you to verify the amount of these depsoits in order to launch Phase 2.</p>}
       </div>
 
-      {plaidToken && <div className="d-block d-xl-flex align-items-center mb-4 loaded">
+      {plaidToken && <div className="d-block d-xl-flex align-items-center mb-2 loaded">
         <div className="ml-auto">
           <Row>
-            <Col lg="12" xl="4"><Button block className="mb-4 text-nowrap" onClick={() => updateApp({ manageLinkAccount: true })}>Enter Account/Routing</Button></Col>
-            <Col lg="12" xl="4"><Button block className="mb-4 text-nowrap" onClick={() => updateApp({ manageProcessorToken: true })}>Enter Processor Token</Button></Col>
-            <Col lg="12" xl="4"><PlaidButton plaidToken={plaidToken} onSuccess={linkAccount} /></Col>
+            <Col lg="12" xl="6"><Button block className="mb-2 text-nowrap" onClick={() => updateApp({ manageLinkAccount: true })}>Enter Account/Routing</Button></Col>
+            <Col lg="12" xl="6"><Button block className="mb-2 text-nowrap" onClick={() => setProcessorTokenFlowModal(true)}>Processor Token Flow</Button></Col>
           </Row>
         </div>
       </div>}
@@ -463,7 +416,7 @@ const Accounts = ({ page, previous, next, isActive }) => {
         <Button variant="link" className="text-reset font-italic p-0 text-decoration-none" href="https://dashboard.plaid.com/signin" target="_blank" rel="noopener noreferrer"><span className="lnk">How do I login to Plaid?</span> <i className="sila-icon sila-icon-info text-primary ml-2"></i></Button>
       </p>
 
-      {app.alert.message && <div className="mb-4"><AlertMessage message={app.alert.message} type={app.alert.type} noIcon={app.alert.noIcon} loading={app.alert.loading} /></div>}
+      {app.alert.message && <div className="mb-2"><AlertMessage message={app.alert.message} type={app.alert.type} noIcon={app.alert.noIcon} loading={app.alert.loading} /></div>}
 
       <Pagination
         previous={previous}
@@ -477,6 +430,8 @@ const Accounts = ({ page, previous, next, isActive }) => {
       <ConfirmModal show={confirm.show} message={confirm.message} onHide={confirm.onHide} buttonLabel="Delete" onSuccess={confirm.onSuccess} />
 
       <InstitutionsModal institutions={institutions} errors={errors} isFetching={isFetching} show={showInstitution} onSearch={(filter, page) => getInstitutions(filter, page)} onClose={() => setShowInstitution(false)} />
+
+      <ProcessorTokenFlowModal show={processorTokenFlowModal} onShowProcessorTokenModal={onShowProcessorTokenModal} onHide={() => setProcessorTokenFlowModal(false)} />
 
     </Container>
   );
